@@ -41,14 +41,6 @@ git clone https://github.com/mwolson/audio-profile-manager.git
 cd audio-profile-manager
 ```
 
-Edit `systemd/audio-profile-manager.service` to uncomment the `After=` and
-`WantedBy=` lines matching your desktop environment:
-
-- **KDE Plasma (Wayland):** `plasma-workspace-wayland.target` (default)
-- **GNOME (Wayland):** `gnome-session-wayland.target`
-- **COSMIC:** `cosmic-session.target`
-- Fallback: `default.target` (any graphical session)
-
 Then run:
 
 ```bash
@@ -79,7 +71,7 @@ You can customize behavior by editing the `ExecStart` line in the service file:
 
 ```
 --card CARD_NAME       PipeWire/PulseAudio card name (default: auto-detect HDMI card)
---profile PROFILE      Desired audio profile (default: pro-audio)
+--profile PROFILE      Desired audio profile (default: auto-detect active profile)
 --wake-delay SECONDS   Seconds to wait after wake before cycling (default: 3)
 ```
 

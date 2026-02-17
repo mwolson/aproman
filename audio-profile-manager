@@ -17,7 +17,7 @@
 #
 # Options:
 #   --card CARD_NAME       PipeWire/PulseAudio card name (default: auto-detect HDMI card)
-#   --profile PROFILE      Desired audio profile (default: pro-audio)
+#   --profile PROFILE      Desired audio profile (default: auto-detect active profile)
 #   --wake-delay SECONDS   Seconds to wait after wake before cycling (default: 3)
 #   --help                 Show this help message
 #
@@ -29,7 +29,7 @@
 set -euo pipefail
 
 CARD_NAME=""
-PROFILE="pro-audio"
+PROFILE=""
 WAKE_DELAY=3
 
 for cmd in dbus-monitor pactl; do
@@ -118,6 +118,12 @@ if [[ -z "$current_profile" ]]; then
     echo "Error: Card '$CARD_NAME' not found or has no active profile." >&2
     exit 1
 fi
+
+if [[ -z "$PROFILE" ]]; then
+    PROFILE="$current_profile"
+    echo "No --profile specified, using active profile: $PROFILE"
+fi
+
 echo "Card: $CARD_NAME"
 echo "Current profile: $current_profile"
 echo "Target profile: $PROFILE"
