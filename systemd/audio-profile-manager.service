@@ -1,0 +1,33 @@
+[Unit]
+Description=Fix HDMI audio after suspend/resume
+# Uncomment the After/WantedBy line matching your desktop environment.
+
+# KDE Plasma (Wayland):
+After=plasma-workspace-wayland.target
+
+# GNOME (Wayland):
+#After=gnome-session-wayland.target
+
+# COSMIC:
+#After=cosmic-session.target
+
+# Fallback (any graphical session):
+#After=default.target
+
+[Service]
+ExecStart=%h/.local/bin/audio-profile-manager
+Restart=on-failure
+RestartSec=5
+
+[Install]
+# KDE Plasma (Wayland):
+WantedBy=plasma-workspace-wayland.target
+
+# GNOME (Wayland):
+#WantedBy=gnome-session-wayland.target
+
+# COSMIC:
+#WantedBy=cosmic-session.target
+
+# Fallback (any graphical session):
+#WantedBy=default.target

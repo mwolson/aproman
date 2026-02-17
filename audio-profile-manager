@@ -1,0 +1,147 @@
+#!/bin/bash
+#
+# audio-profile-manager: Fix HDMI audio after suspend/resume on PipeWire + WirePlumber
+#
+# Problem: When a Linux system resumes from suspend, HDMI audio devices often lose their
+# connection. WirePlumber tries to link to stale node proxies, resulting in silence.
+# The manual fix is to switch the audio profile away and back, forcing a full teardown
+# and rebuild of the audio nodes.
+#
+# This script automates that fix by monitoring D-Bus for suspend/resume events and
+# cycling the audio card profile on wake.
+#
+# Requirements: pactl, dbus-monitor (both standard on PipeWire/PulseAudio systems)
+#
+# Usage:
+#   audio-profile-manager [OPTIONS]
+#
+# Options:
+#   --card CARD_NAME       PipeWire/PulseAudio card name (default: auto-detect HDMI card)
+#   --profile PROFILE      Desired audio profile (default: pro-audio)
+#   --wake-delay SECONDS   Seconds to wait after wake before cycling (default: 3)
+#   --help                 Show this help message
+#
+# Examples:
+#   audio-profile-manager
+#   audio-profile-manager --card alsa_card.pci-0000_01_00.1 --profile pro-audio
+#   audio-profile-manager --card alsa_card.pci-0000_02_00.1 --wake-delay 5
+
+set -euo pipefail
+
+CARD_NAME=""
+PROFILE="pro-audio"
+WAKE_DELAY=3
+
+for cmd in dbus-monitor pactl; do
+    if ! command -v "$cmd" &>/dev/null; then
+        echo "Error: '$cmd' is required but not found in PATH." >&2
+        exit 1
+    fi
+done
+
+function usage() {
+    awk 'NR<=2 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"
+}
+
+function detect_hdmi_card() {
+    local card
+    card=$(pactl list cards 2>/dev/null | awk '
+        /^\tName:/ { name = $2 }
+        /port\.type = "hdmi"/ { print name; exit }
+    ')
+
+    if [[ -z "$card" ]]; then
+        echo "Error: No HDMI audio card detected. Use --card to specify one manually." >&2
+        exit 1
+    fi
+
+    echo "$card"
+}
+
+function get_active_profile() {
+    pactl list cards 2>/dev/null | awk -v card="$CARD_NAME" '
+        /^\tName:/ { found = ($2 == card) }
+        found && /Active Profile:/ { sub(/.*Active Profile: /, ""); print; exit }
+    '
+}
+
+function cycle_profile() {
+    local current_profile
+    current_profile=$(get_active_profile)
+
+    if [[ -z "$current_profile" ]]; then
+        echo "Warning: Could not determine active profile for $CARD_NAME. Skipping cycle." >&2
+        return
+    fi
+
+    echo "Cycling profile on $CARD_NAME: $current_profile -> off -> $PROFILE"
+    pactl set-card-profile "$CARD_NAME" off
+    sleep 1
+    pactl set-card-profile "$CARD_NAME" "$PROFILE"
+    echo "Profile restored to $PROFILE."
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --card)
+            CARD_NAME="$2"
+            shift 2
+            ;;
+        --profile)
+            PROFILE="$2"
+            shift 2
+            ;;
+        --wake-delay)
+            WAKE_DELAY="$2"
+            shift 2
+            ;;
+        --help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+done
+
+if [[ -z "$CARD_NAME" ]]; then
+    echo "No --card specified, auto-detecting HDMI audio card..."
+    CARD_NAME=$(detect_hdmi_card)
+    echo "Detected: $CARD_NAME"
+fi
+
+current_profile=$(get_active_profile)
+if [[ -z "$current_profile" ]]; then
+    echo "Error: Card '$CARD_NAME' not found or has no active profile." >&2
+    exit 1
+fi
+echo "Card: $CARD_NAME"
+echo "Current profile: $current_profile"
+echo "Target profile: $PROFILE"
+
+dbus_filter="interface=org.freedesktop.login1.Manager,sender=org.freedesktop.login1,member=PrepareForSleep"
+event_is_sleep=false
+
+echo "Monitoring for suspend/resume events..."
+dbus-monitor --system --monitor "$dbus_filter" | while read -r line; do
+    if [[ $line =~ "member=PrepareForSleep" ]]; then
+        event_is_sleep=true
+    else
+        if [[ $event_is_sleep == true ]]; then
+            if [[ $line =~ "boolean true" ]]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') Going to sleep."
+            elif [[ $line =~ "boolean false" ]]; then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') Waking from sleep, waiting ${WAKE_DELAY}s for HDMI to renegotiate..."
+                sleep "$WAKE_DELAY"
+                cycle_profile
+            else
+                echo "$(date '+%Y-%m-%d %H:%M:%S') Unknown state after PrepareForSleep event: $line"
+            fi
+        fi
+
+        event_is_sleep=false
+    fi
+done
