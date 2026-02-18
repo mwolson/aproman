@@ -75,23 +75,32 @@ function cycle_profile() {
     fi
 
     echo "Cycling profile on $CARD_NAME: $current_profile -> off -> $PROFILE"
-    pactl set-card-profile "$CARD_NAME" off
+    if ! pactl set-card-profile "$CARD_NAME" off; then
+        echo "Warning: Failed to set profile to 'off'. Will retry next cycle." >&2
+        return
+    fi
     sleep 1
-    pactl set-card-profile "$CARD_NAME" "$PROFILE"
+    if ! pactl set-card-profile "$CARD_NAME" "$PROFILE"; then
+        echo "Warning: Failed to restore profile to '$PROFILE'. Will retry next cycle." >&2
+        return
+    fi
     echo "Profile restored to $PROFILE."
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --card)
+            [[ $# -ge 2 ]] || { echo "Error: --card requires a value" >&2; exit 1; }
             CARD_NAME="$2"
             shift 2
             ;;
         --profile)
+            [[ $# -ge 2 ]] || { echo "Error: --profile requires a value" >&2; exit 1; }
             PROFILE="$2"
             shift 2
             ;;
         --wake-delay)
+            [[ $# -ge 2 ]] || { echo "Error: --wake-delay requires a value" >&2; exit 1; }
             WAKE_DELAY="$2"
             shift 2
             ;;
@@ -106,6 +115,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if ! [[ "$WAKE_DELAY" =~ ^[0-9]+\.?[0-9]*$ ]] || [[ "$WAKE_DELAY" == "0" ]]; then
+    echo "Error: --wake-delay must be a positive number (got '$WAKE_DELAY')" >&2
+    exit 1
+fi
 
 if [[ -z "$CARD_NAME" ]]; then
     echo "No --card specified, auto-detecting HDMI audio card..."

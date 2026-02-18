@@ -6,9 +6,6 @@
 #   1. Copies audio-profile-manager to ~/.local/bin/
 #   2. Copies the systemd service to ~/.config/systemd/user/
 #   3. Enables (but does not start) the service
-#
-# Before running, edit systemd/audio-profile-manager.service to uncomment
-# the After= and WantedBy= lines matching your desktop environment.
 
 set -euo pipefail
 

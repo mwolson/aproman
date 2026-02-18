@@ -50,7 +50,7 @@ Then run:
 This copies `audio-profile-manager` to `~/.local/bin/` and installs + enables
 the systemd user service.
 
-To start immediately without rebooting:
+To start immediately without logging out:
 
 ```bash
 systemctl --user start audio-profile-manager.service

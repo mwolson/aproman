@@ -1,11 +1,10 @@
 [Unit]
 Description=Fix HDMI audio after suspend/resume
-After=graphical-session.target
+After=graphical-session.target pipewire.service pipewire-pulse.service wireplumber.service
 
 [Service]
 ExecStart=%h/.local/bin/audio-profile-manager
 Restart=on-failure
-RestartSec=5
 
 [Install]
 WantedBy=graphical-session.target
