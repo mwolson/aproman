@@ -1,24 +1,29 @@
 #!/bin/bash
 #
-# audio-profile-manager: Fix HDMI audio after suspend/resume on PipeWire + WirePlumber
+# audio-profile-manager: Fix HDMI audio after suspend/resume on PipeWire +
+# WirePlumber
 #
-# Problem: When a Linux system resumes from suspend, HDMI audio devices often lose their
-# connection. WirePlumber tries to link to stale node proxies, resulting in silence.
-# The manual fix is to switch the audio profile away and back, forcing a full teardown
-# and rebuild of the audio nodes.
+# Problem: When a Linux system resumes from suspend, HDMI audio devices often
+# lose their connection. WirePlumber tries to link to stale node proxies,
+# resulting in silence.  The manual fix is to switch the audio profile away and
+# back, forcing a full teardown and rebuild of the audio nodes.
 #
-# This script automates that fix by monitoring D-Bus for suspend/resume events and
-# cycling the audio card profile on wake.
+# This script automates that fix by monitoring D-Bus for suspend/resume events
+# and cycling the audio card profile on wake.
 #
-# Requirements: pactl, dbus-monitor (both standard on PipeWire/PulseAudio systems)
+# Requirements: pactl, dbus-monitor (both standard on PipeWire/PulseAudio
+# systems)
 #
 # Usage:
 #   audio-profile-manager [OPTIONS]
 #
 # Options:
-#   --card CARD_NAME       PipeWire/PulseAudio card name (default: auto-detect HDMI card)
-#   --profile PROFILE      Desired audio profile (default: auto-detect active profile)
-#   --wake-delay SECONDS   Seconds to wait after wake before cycling (default: 3)
+#   --card CARD_NAME       PipeWire/PulseAudio card name
+#                          (default: auto-detect HDMI card)
+#   --profile PROFILE      Desired audio profile
+#                          (default: auto-detect active profile)
+#   --wake-delay SECONDS   Seconds to wait after wake before cycling
+#                          (default: 3)
 #   --help                 Show this help message
 #
 # Examples:
@@ -73,6 +78,10 @@ function cycle_profile() {
         echo "Warning: Could not determine active profile for $CARD_NAME. Skipping cycle." >&2
         return
     fi
+
+    echo "Restarting pipewire and pipewire-pulse"
+    systemctl --user restart pipewire.service
+    systemctl --user restart pipewire-pulse.service
 
     echo "Cycling profile on $CARD_NAME: $current_profile -> off -> $PROFILE"
     if ! pactl set-card-profile "$CARD_NAME" off; then
