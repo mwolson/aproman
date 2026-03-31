@@ -93,12 +93,32 @@ class ApromanTests(unittest.TestCase):
         )
         self.assertEqual(
             [
-                mock.call("alsa_card.pci-0000_01_00.1", "off"),
-                mock.call("alsa_card.pci-0000_01_00.1", "output:hdmi-stereo"),
+                mock.call("alsa_card.pci-0000_01_00.1", "off", attempts=20, retry_delay=0.25),
+                mock.call(
+                    "alsa_card.pci-0000_01_00.1",
+                    "output:hdmi-stereo",
+                    attempts=20,
+                    retry_delay=0.25,
+                ),
             ],
             set_card_profile_mock.call_args_list,
         )
         sleep_mock.assert_called_once_with(1.0)
+
+    @mock.patch.object(APROMAN.time, "sleep")
+    @mock.patch.object(APROMAN.subprocess, "run")
+    def test_set_card_profile_retries_until_success(self, run_mock, sleep_mock):
+        run_mock.side_effect = [
+            mock.Mock(returncode=1),
+            mock.Mock(returncode=1),
+            mock.Mock(returncode=0),
+        ]
+
+        success = APROMAN.set_card_profile("alsa_card.pci-0000_01_00.1", "off", attempts=3, retry_delay=0.5)
+
+        self.assertTrue(success)
+        self.assertEqual(3, run_mock.call_count)
+        self.assertEqual([mock.call(0.5), mock.call(0.5)], sleep_mock.call_args_list)
 
     @mock.patch.object(
         APROMAN.subprocess,

@@ -16,21 +16,21 @@ def main():
     card_name = args.card or detect_hdmi_card()
     current_profile = get_active_profile(card_name)
     if not current_profile:
-        print(f"Error: Card '{card_name}' not found or has no active profile.", file=sys.stderr)
+        warn(f"Error: Card '{card_name}' not found or has no active profile.")
         sys.exit(1)
 
     profile = args.profile or current_profile
 
     if not args.card:
-        print("No --card specified, auto-detecting HDMI audio card...")
-        print(f"Detected: {card_name}")
+        log("No --card specified, auto-detecting HDMI audio card...")
+        log(f"Detected: {card_name}")
     if not args.profile:
-        print(f"No --profile specified, using active profile: {profile}")
+        log(f"No --profile specified, using active profile: {profile}")
 
-    print(f"Card: {card_name}")
-    print(f"Current profile: {current_profile}")
-    print(f"Target profile: {profile}")
-    print("Monitoring for suspend/resume events...")
+    log(f"Card: {card_name}")
+    log(f"Current profile: {current_profile}")
+    log(f"Target profile: {profile}")
+    log("Monitoring for suspend/resume events...")
 
     monitor_suspend_resume(args.wake_delay, lambda: handle_resume(card_name, profile, args.wake_delay))
 
@@ -65,7 +65,7 @@ def require_commands(commands):
     missing = [command for command in commands if not shutil.which(command)]
     if missing:
         for command in missing:
-            print(f"Error: '{command}' is required but not found in PATH.", file=sys.stderr)
+            warn(f"Error: '{command}' is required but not found in PATH.")
         sys.exit(1)
 
 
@@ -73,7 +73,7 @@ def detect_hdmi_card():
     for name, block in iter_card_blocks():
         if any('port.type = "hdmi"' in line for line in block):
             return name
-    print("Error: No HDMI audio card detected. Use --card to specify one manually.", file=sys.stderr)
+    warn("Error: No HDMI audio card detected. Use --card to specify one manually.")
     sys.exit(1)
 
 
@@ -90,7 +90,10 @@ def get_active_profile(card_name):
 
 
 def iter_card_blocks():
-    output = subprocess.check_output(["pactl", "list", "cards"], text=True, stderr=subprocess.DEVNULL)
+    try:
+        output = subprocess.check_output(["pactl", "list", "cards"], text=True, stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        return
     card_name = None
     block = []
     for line in output.splitlines():
@@ -109,7 +112,7 @@ def iter_card_blocks():
 
 
 def handle_resume(card_name, profile, wake_delay):
-    print(f"{timestamp()} Waking from sleep, waiting {wake_delay:g}s for HDMI to renegotiate...")
+    log(f"{timestamp()} Waking from sleep, waiting {wake_delay:g}s for HDMI to renegotiate...")
     time.sleep(wake_delay)
     cycle_profile(card_name, profile)
 
@@ -117,39 +120,41 @@ def handle_resume(card_name, profile, wake_delay):
 def cycle_profile(card_name, target_profile):
     current_profile = get_active_profile(card_name)
     if not current_profile:
-        print(f"Warning: Could not determine active profile for {card_name}. Skipping cycle.", file=sys.stderr)
+        warn(f"Warning: Could not determine active profile for {card_name}. Skipping cycle.")
         return
 
-    print("Restarting pipewire and pipewire-pulse")
+    log("Restarting pipewire and pipewire-pulse")
     subprocess.run(["systemctl", "--user", "restart", "pipewire.service"], check=True)
     subprocess.run(["systemctl", "--user", "restart", "pipewire-pulse.service"], check=True)
 
-    print(f"Cycling profile on {card_name}: {current_profile} -> off -> {target_profile}")
-    if not set_card_profile(card_name, "off"):
-        print("Warning: Failed to set profile to 'off'. Will retry next cycle.", file=sys.stderr)
+    log(f"Cycling profile on {card_name}: {current_profile} -> off -> {target_profile}")
+    if not set_card_profile(card_name, "off", attempts=20, retry_delay=0.25):
+        warn("Warning: Failed to set profile to 'off'. Will retry next cycle.")
         return
 
     time.sleep(1.0)
 
-    if not set_card_profile(card_name, target_profile):
-        print(
-            f"Warning: Failed to restore profile to '{target_profile}'. Will retry next cycle.",
-            file=sys.stderr,
-        )
+    if not set_card_profile(card_name, target_profile, attempts=20, retry_delay=0.25):
+        warn(f"Warning: Failed to restore profile to '{target_profile}'. Will retry next cycle.")
         return
 
-    print(f"Profile restored to {target_profile}.")
+    log(f"Profile restored to {target_profile}.")
 
 
-def set_card_profile(card_name, profile):
-    result = subprocess.run(
-        ["pactl", "set-card-profile", card_name, profile],
-        check=False,
-        text=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return result.returncode == 0
+def set_card_profile(card_name, profile, attempts=1, retry_delay=0.25):
+    for attempt in range(attempts):
+        result = subprocess.run(
+            ["pactl", "set-card-profile", card_name, profile],
+            check=False,
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if result.returncode == 0:
+            return True
+        if attempt + 1 < attempts:
+            time.sleep(retry_delay)
+    return False
 
 
 def monitor_suspend_resume(wake_delay, on_resume):
@@ -179,11 +184,11 @@ def monitor_suspend_resume(wake_delay, on_resume):
 
             expect_state = False
             if "boolean true" in line:
-                print(f"{timestamp()} Going to sleep.")
+                log(f"{timestamp()} Going to sleep.")
             elif "boolean false" in line:
                 on_resume()
             else:
-                print(f"{timestamp()} Unknown state after PrepareForSleep event: {line}")
+                log(f"{timestamp()} Unknown state after PrepareForSleep event: {line}")
     except KeyboardInterrupt:
         process.terminate()
     finally:
@@ -194,6 +199,14 @@ def monitor_suspend_resume(wake_delay, on_resume):
 
 def timestamp():
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def log(message):
+    print(message, flush=True)
+
+
+def warn(message):
+    print(message, file=sys.stderr, flush=True)
 
 
 if __name__ == "__main__":
