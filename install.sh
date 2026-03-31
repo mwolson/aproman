@@ -1,38 +1,36 @@
 #!/bin/bash
-#
-# Install audio-profile-manager and its systemd user service.
-#
-# This script:
-#   1. Copies audio-profile-manager to ~/.local/bin/
-#   2. Copies the systemd service to ~/.config/systemd/user/
-#   3. Enables (but does not start) the service
 
 set -euo pipefail
+
+if ! command -v systemctl >/dev/null 2>&1; then
+    echo "Error: 'systemctl' is required but not found in PATH." >&2
+    exit 1
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 BIN_DIR="$HOME/.local/bin"
 SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 
-echo "Installing audio-profile-manager..."
+echo "Installing aproman..."
 
 mkdir -p "$BIN_DIR"
-cp "$SCRIPT_DIR/audio-profile-manager" "$BIN_DIR/audio-profile-manager"
-chmod +x "$BIN_DIR/audio-profile-manager"
-echo "  Installed $BIN_DIR/audio-profile-manager"
+cp "$SCRIPT_DIR/aproman" "$BIN_DIR/aproman"
+chmod +x "$BIN_DIR/aproman"
+echo "  Installed $BIN_DIR/aproman"
 
 mkdir -p "$SYSTEMD_USER_DIR"
-cp "$SCRIPT_DIR/systemd/audio-profile-manager.service" "$SYSTEMD_USER_DIR/"
-echo "  Installed $SYSTEMD_USER_DIR/audio-profile-manager.service"
+cp "$SCRIPT_DIR/systemd/aproman.service" "$SYSTEMD_USER_DIR/"
+echo "  Installed $SYSTEMD_USER_DIR/aproman.service"
 
 systemctl --user daemon-reload
-systemctl --user enable audio-profile-manager.service
-echo "  Enabled audio-profile-manager.service"
+systemctl --user enable aproman.service
+echo "  Enabled aproman.service"
 
 echo ""
 echo "Done. To start immediately:"
-echo "  systemctl --user start audio-profile-manager.service"
+echo "  systemctl --user start aproman.service"
 echo ""
 echo "To check status:"
-echo "  systemctl --user status audio-profile-manager.service"
-echo "  journalctl --user -u audio-profile-manager.service -f"
+echo "  systemctl --user status aproman.service"
+echo "  journalctl --user -u aproman.service -f"

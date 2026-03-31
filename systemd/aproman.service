@@ -3,7 +3,7 @@ Description=Fix HDMI audio after suspend/resume
 After=graphical-session.target pipewire.service pipewire-pulse.service wireplumber.service
 
 [Service]
-ExecStart=%h/.local/bin/audio-profile-manager
+ExecStart=%h/.local/bin/aproman
 Restart=on-failure
 
 [Install]
