@@ -14,7 +14,7 @@ Prefer to write plans in the `plans/` directory.
 
 - Single Python 3 script (`aproman`) containing the daemon.
 - No external Python dependencies -- stdlib only.
-- Keep code comments minimal. The user is a Staff Engineer.
+- Keep code comments minimal.
 - Prefer top-down control flow: caller first, then callee.
 - When writing bash scripts: `#!/bin/bash`, 4-space indentation, fail-fast
   dependency checks.
