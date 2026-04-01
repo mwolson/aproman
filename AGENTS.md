@@ -76,8 +76,9 @@ bun run hooks:pre-commit:all
    git fetch --tags
    ```
 
-3. Update the version in `package.json`, then commit the version bump separately
-   from other changes with message `chore: bump version to <version>`.
+3. Update the version in both `package.json` and the `VERSION` constant in
+   `aproman`, then commit the version bump separately from other changes with
+   message `chore: bump version to <version>`.
 
 4. Ask the user what tag name they want. Provide examples based on the current
    version:

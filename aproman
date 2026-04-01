@@ -8,6 +8,8 @@ import subprocess
 import sys
 import time
 
+VERSION = "0.0.1"
+
 
 def main():
     args = parse_args()
@@ -40,6 +42,7 @@ def parse_args():
         prog="aproman",
         description="Fix HDMI audio after suspend/resume on PipeWire + WirePlumber.",
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     parser.add_argument("--card", help="PipeWire/PulseAudio card name")
     parser.add_argument("--profile", help="Desired audio profile")
     parser.add_argument(
