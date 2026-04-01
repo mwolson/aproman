@@ -9,7 +9,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def load_module():
-    loader = importlib.machinery.SourceFileLoader("aproman_module", str(ROOT / "aproman"))
+    loader = importlib.machinery.SourceFileLoader("aproman_module", str(ROOT / "aproman.py"))
     spec = importlib.util.spec_from_loader(loader.name, loader)
     if spec is None:
         raise RuntimeError("Failed to create import spec for aproman")

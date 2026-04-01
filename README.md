@@ -33,20 +33,36 @@ without manual intervention.
 
 ## Installation
 
+### Recommended: uv
+
+```bash
+uv tool install git+https://github.com/mwolson/aproman
+```
+
+This installs `aproman` to `~/.local/bin/`.
+
+Then install and start the systemd service:
+
+```bash
+git clone https://github.com/mwolson/aproman.git
+cd aproman
+mkdir -p ~/.config/systemd/user
+cp systemd/aproman.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now aproman.service
+```
+
+### Alternative: install.sh
+
 ```bash
 git clone https://github.com/mwolson/aproman.git
 cd aproman
 ./install.sh
+systemctl --user start aproman.service
 ```
 
 This copies `aproman` to `~/.local/bin/` and installs and enables the user
 service.
-
-To start immediately without logging out:
-
-```bash
-systemctl --user start aproman.service
-```
 
 ## Usage
 
@@ -92,7 +108,7 @@ systemctl --user restart aproman.service
 
 ```bash
 systemctl --user disable --now aproman.service
-rm ~/.local/bin/aproman
+uv tool uninstall aproman  # or: rm ~/.local/bin/aproman
 rm ~/.config/systemd/user/aproman.service
 systemctl --user daemon-reload
 ```

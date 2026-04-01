@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aproman"
+version = "0.0.1"
+description = "Fix HDMI audio after suspend/resume on PipeWire + WirePlumber"
+license = "MIT"
+requires-python = ">=3.9"
+
+[project.scripts]
+aproman = "aproman:main"
+
+[tool.hatch.build.targets.wheel]
+include = ["aproman.py"]

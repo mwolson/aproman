@@ -15,7 +15,7 @@ SYSTEMD_USER_DIR="$HOME/.config/systemd/user"
 echo "Installing aproman..."
 
 mkdir -p "$BIN_DIR"
-cp "$SCRIPT_DIR/aproman" "$BIN_DIR/aproman"
+cp "$SCRIPT_DIR/aproman.py" "$BIN_DIR/aproman"
 chmod +x "$BIN_DIR/aproman"
 echo "  Installed $BIN_DIR/aproman"
 
