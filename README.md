@@ -36,7 +36,7 @@ without manual intervention.
 ### Recommended: uv
 
 ```bash
-uv tool install git+https://github.com/mwolson/aproman
+uv tool install aproman
 ```
 
 This installs `aproman` to `~/.local/bin/`.
