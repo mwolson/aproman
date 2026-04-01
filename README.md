@@ -1,6 +1,7 @@
 # aproman
 
-Fix HDMI audio after suspend/resume on Linux systems running PipeWire + WirePlumber.
+Fix HDMI audio after suspend/resume on Linux systems running PipeWire +
+WirePlumber.
 
 ## The Problem
 
