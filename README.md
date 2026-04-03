@@ -15,7 +15,7 @@ rebuild of the audio nodes.
 
 `aproman` runs as a user systemd service and:
 
-1. Auto-detects your HDMI audio card, or accepts one via `--card`
+1. Auto-detects your HDMI audio card, or uses the one saved in the config file
 2. Monitors D-Bus for `PrepareForSleep` signals from systemd-logind
 3. On wake, waits briefly for HDMI to renegotiate, then cycles the card profile
    off and back on
@@ -64,6 +64,23 @@ systemctl --user start aproman.service
 This copies `aproman` to `~/.local/bin/` and installs and enables the user
 service.
 
+### Optional: set defaults
+
+After installing, you can optionally save your preferred card and profile so
+that aproman uses them instead of auto-detecting:
+
+```bash
+aproman list-cards
+aproman set-default-card alsa_card.pci-0000_01_00.1
+
+aproman list-profiles
+aproman set-default-profile pro-audio
+```
+
+These write to `~/.config/aproman.conf` and signal the running daemon to pick up
+the changes. Without defaults, aproman auto-detects the first HDMI card and uses
+its active profile at startup.
+
 ## Usage
 
 The service runs automatically. To check status:
@@ -73,35 +90,73 @@ systemctl --user status aproman.service
 journalctl --user -u aproman.service -f
 ```
 
-### Command-Line Options
+### Commands
 
-You can customize behavior by editing the `ExecStart` line in the service file:
+aproman uses subcommands for one-off operations. With no subcommand, it runs as
+a daemon.
 
 ```text
---card CARD_NAME       PipeWire/PulseAudio card name (default: auto-detect HDMI card)
---profile PROFILE      Desired audio profile (default: active profile on startup)
+aproman                              Run as a daemon (default)
+aproman cycle                        Cycle the card profile off and back on
+aproman get-default-card             Print the default card from the config file
+aproman get-default-profile          Print the default profile from the config file
+aproman list-cards                   List available audio cards
+aproman list-profiles                List available profiles for the card
+aproman set-default-card CARD        Save default card and signal the daemon
+aproman set-default-profile PROFILE  Save default profile and signal the daemon
+```
+
+### Daemon options
+
+These flags apply to the daemon and to `cycle`:
+
+```text
+--card CARD            PipeWire/PulseAudio card name (default: config file, then auto-detect HDMI)
+--profile PROFILE      Desired audio profile (default: config file, then active profile)
 --wake-delay SECONDS   Seconds to wait after wake before cycling (default: 3.0)
 ```
 
-To find your card name:
+### Configuration File
+
+`aproman` reads defaults from `~/.config/aproman.conf` (or
+`$XDG_CONFIG_HOME/aproman.conf`). The file uses one flag per line:
+
+```text
+--card=alsa_card.pci-0000_01_00.1
+--profile=pro-audio
+```
+
+Only `--card` and `--profile` are supported. Unrecognized flags cause an error
+at startup. Command-line arguments always take precedence over the config file.
+
+When the daemon receives a SIGHUP (sent automatically by `set-default-card` and
+`set-default-profile`, or manually via `kill -HUP`), it reloads the config file
+and updates the card and profile for future suspend/resume cycles.
+
+### One-Shot Fix
+
+If audio breaks and the daemon missed the resume event (for example, after a
+service restart), you can manually trigger a single profile cycle:
 
 ```bash
-pactl list cards short
+aproman cycle
+```
+
+This sends a cycle request to the running daemon via its Unix socket. If the
+daemon is unavailable, it falls back to running the cycle directly.
+
+When the card is stuck in the `off` state, `cycle` automatically selects the
+highest-priority available profile. You can override with `--profile`:
+
+```bash
+aproman --profile pro-audio cycle
 ```
 
 ### Example: Custom Card and Profile
 
-Edit `~/.config/systemd/user/aproman.service`:
-
-```ini
-ExecStart=%h/.local/bin/aproman --card alsa_card.pci-0000_01_00.1 --profile output:hdmi-stereo
-```
-
-Then reload and restart:
-
 ```bash
-systemctl --user daemon-reload
-systemctl --user restart aproman.service
+aproman set-default-card alsa_card.pci-0000_01_00.1
+aproman set-default-profile output:hdmi-stereo
 ```
 
 ## Uninstall
@@ -110,6 +165,7 @@ systemctl --user restart aproman.service
 systemctl --user disable --now aproman.service
 uv tool uninstall aproman  # or: rm ~/.local/bin/aproman
 rm ~/.config/systemd/user/aproman.service
+rm -f ~/.config/aproman.conf
 systemctl --user daemon-reload
 ```
 
