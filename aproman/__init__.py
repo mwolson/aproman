@@ -19,6 +19,11 @@ CONF_PATH = os.path.join(
     "aproman.conf",
 )
 ALLOWED_CONF_FLAGS = {"--card", "--profile"}
+SYSTEMD_USER_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+    "systemd",
+    "user",
+)
 
 
 def main():
@@ -33,6 +38,9 @@ def main():
         run_get_default("card")
     elif command == "get-default-profile":
         run_get_default("profile")
+    elif command == "install-service":
+        require_commands(["systemctl"])
+        run_install_service()
     elif command == "list-cards":
         require_commands(["pactl"])
         run_list_cards(args)
@@ -43,6 +51,9 @@ def main():
         run_set_default("card", args.value)
     elif command == "set-default-profile":
         run_set_default("profile", args.value)
+    elif command == "uninstall-service":
+        require_commands(["systemctl"])
+        run_uninstall_service()
     else:
         require_commands(["dbus-monitor", "pactl", "systemctl"])
         run_daemon(args)
@@ -162,6 +173,60 @@ def signal_daemon():
         log(f"Sent SIGHUP to aproman daemon (PID {pid})")
     except OSError as exc:
         warn(f"Warning: Could not signal daemon (PID {pid}): {exc}")
+
+
+def run_install_service():
+    content = get_service_source()
+    service_path = os.path.join(SYSTEMD_USER_DIR, "aproman.service")
+
+    os.makedirs(SYSTEMD_USER_DIR, exist_ok=True)
+    with open(service_path, "w") as f:
+        f.write(content)
+    log(f"Installed {service_path}")
+
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+    subprocess.run(["systemctl", "--user", "enable", "aproman.service"], check=True)
+    log("Enabled aproman.service")
+
+    log("")
+    log("To start immediately:")
+    log("  systemctl --user start aproman.service")
+    log("")
+    log("To check status:")
+    log("  systemctl --user status aproman.service")
+    log("  journalctl --user -u aproman.service -f")
+
+
+def get_service_source():
+    try:
+        from importlib.resources import files
+
+        return (files("aproman") / "systemd" / "aproman.service").read_text()
+    except (FileNotFoundError, TypeError, ModuleNotFoundError):
+        pass
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, "systemd", "aproman.service")
+    with open(path) as f:
+        return f.read()
+
+
+def run_uninstall_service():
+    service_path = os.path.join(SYSTEMD_USER_DIR, "aproman.service")
+
+    subprocess.run(
+        ["systemctl", "--user", "disable", "--now", "aproman.service"],
+        check=False,
+    )
+
+    try:
+        os.remove(service_path)
+        log(f"Removed {service_path}")
+    except FileNotFoundError:
+        log(f"No service file at {service_path}")
+
+    subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
+    log("Uninstalled aproman.service")
 
 
 def run_cycle(args):
@@ -301,12 +366,14 @@ def parse_args(file_args):
     sub.add_parser("cycle", help="cycle the card profile off and back on once, then exit")
     sub.add_parser("get-default-card", help="print the default card from the config file")
     sub.add_parser("get-default-profile", help="print the default profile from the config file")
+    sub.add_parser("install-service", help="install and enable the systemd user service")
     sub.add_parser("list-cards", help="list available audio cards")
     sub.add_parser("list-profiles", help="list available profiles for the card")
     p = sub.add_parser("set-default-card", help="set the default card and signal the daemon")
     p.add_argument("value", metavar="CARD")
     p = sub.add_parser("set-default-profile", help="set the default profile and signal the daemon")
     p.add_argument("value", metavar="PROFILE")
+    sub.add_parser("uninstall-service", help="disable and remove the systemd user service")
 
     args = parser.parse_args()
 

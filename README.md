@@ -37,20 +37,12 @@ without manual intervention.
 
 ```bash
 uv tool install aproman
+aproman install-service
+systemctl --user start aproman.service
 ```
 
-This installs `aproman` to `~/.local/bin/`.
-
-Then install and start the systemd service:
-
-```bash
-git clone https://github.com/mwolson/aproman.git
-cd aproman
-mkdir -p ~/.config/systemd/user
-cp systemd/aproman.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now aproman.service
-```
+This installs `aproman` to `~/.local/bin/`, copies the systemd user service into
+place, and enables it.
 
 ### Alternative: install.sh
 
@@ -100,10 +92,12 @@ aproman                              Run as a daemon (default)
 aproman cycle                        Cycle the card profile off and back on
 aproman get-default-card             Print the default card from the config file
 aproman get-default-profile          Print the default profile from the config file
+aproman install-service              Install and enable the systemd user service
 aproman list-cards                   List available audio cards
 aproman list-profiles                List available profiles for the card
 aproman set-default-card CARD        Save default card and signal the daemon
 aproman set-default-profile PROFILE  Save default profile and signal the daemon
+aproman uninstall-service            Disable and remove the systemd user service
 ```
 
 ### Daemon options
@@ -162,11 +156,9 @@ aproman set-default-profile output:hdmi-stereo
 ## Uninstall
 
 ```bash
-systemctl --user disable --now aproman.service
+aproman uninstall-service
 uv tool uninstall aproman  # or: rm ~/.local/bin/aproman
-rm ~/.config/systemd/user/aproman.service
 rm -f ~/.config/aproman.conf
-systemctl --user daemon-reload
 ```
 
 ## Testing
