@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 
 ALLOWED_CONF_FLAGS = {"--card", "--profile"}
 
