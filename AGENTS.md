@@ -27,6 +27,9 @@ Prefer to write plans in the `plans/` directory.
 - `install.sh` -- legacy installer (use `aproman install-service` instead)
 - `systemd/aproman.service` -- systemd user service definition (bundled in wheel
   via hatch `force-include`)
+- `openrc-system/aproman` -- OpenRC system service init script (for OpenRC
+  versions before 0.60)
+- `openrc-user/aproman` -- OpenRC user service init script (for OpenRC 0.60+)
 
 ## Dev loop tools
 
@@ -40,6 +43,18 @@ bun run test
 
 This executes `python3 -m unittest discover -s tests -v`.
 
+Run integration tests (requires Docker):
+
+```sh
+bun run test:integration
+```
+
+Run all tests:
+
+```sh
+bun run test:all
+```
+
 ### Pre-commit hooks
 
 Lefthook runs the following checks on commit (see `lefthook.yaml`):
@@ -49,17 +64,15 @@ Lefthook runs the following checks on commit (see `lefthook.yaml`):
 - `ty-check` -- type checking via `uvx ty check`
 - `unit-tests` -- full unit test suite
 
-Run the full pre-commit suite manually with:
+Run checks against the working tree (no staging required):
 
 ```sh
-bun run hooks:pre-commit
+bun run hooks:check
 ```
 
-Or against all files (not just staged):
-
-```sh
-bun run hooks:pre-commit:all
-```
+This runs the `pre-commit` hooks against all working tree files with
+`--all-files --no-stage-fixed`, so there is no stashing and no auto-staging.
+Prefer this for iterating on changes before committing.
 
 ## Releasing
 

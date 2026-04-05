@@ -1,0 +1,12 @@
+#!/sbin/openrc-run
+
+description="Fix HDMI audio after suspend/resume"
+supervisor=supervise-daemon
+
+command="$HOME/.local/bin/aproman"
+respawn_delay=1
+respawn_max=0
+
+depend() {
+    need localmount
+}

@@ -2,23 +2,25 @@
   - "**/.venv/**"
   - "**/__pycache__/**"
 
+.common-setup: &common_setup
+  - run: |
+      if ! command -v python3 >/dev/null 2>&1; then
+        echo "python3 is required for pre-commit hooks." >&2
+        exit 1
+      fi
+      if ! command -v uv >/dev/null 2>&1; then
+        echo "uv is required for pre-commit hooks." >&2
+        exit 1
+      fi
+      if ! command -v bun >/dev/null 2>&1; then
+        echo "bun is required for pre-commit hooks." >&2
+        exit 1
+      fi
+
 pre-commit:
   parallel: true
   output: true
-  setup:
-    - run: |
-        if ! command -v python3 >/dev/null 2>&1; then
-          echo "python3 is required for pre-commit hooks." >&2
-          exit 1
-        fi
-        if ! command -v uv >/dev/null 2>&1; then
-          echo "uv is required for pre-commit hooks." >&2
-          exit 1
-        fi
-        if ! command -v bun >/dev/null 2>&1; then
-          echo "bun is required for pre-commit hooks." >&2
-          exit 1
-        fi
+  setup: *common_setup
   commands:
     md-format:
       priority: 1

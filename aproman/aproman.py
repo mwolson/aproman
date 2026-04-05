@@ -14,11 +14,18 @@ import time
 
 VERSION = "0.3.1"
 
+ALLOWED_CONF_FLAGS = {"--card", "--profile"}
+
 CONF_PATH = os.path.join(
     os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
     "aproman.conf",
 )
-ALLOWED_CONF_FLAGS = {"--card", "--profile"}
+OPENRC_SYSTEM_INIT_DIR = "/etc/init.d"
+OPENRC_USER_INIT_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+    "rc",
+    "init.d",
+)
 SYSTEMD_USER_DIR = os.path.join(
     os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
     "systemd",
@@ -32,15 +39,27 @@ def main():
 
     command = getattr(args, "command", None)
     if command == "cycle":
-        require_commands(["pactl", "systemctl"])
+        require_commands(["pactl"])
         run_cycle(args)
     elif command == "get-default-card":
         run_get_default("card")
     elif command == "get-default-profile":
         run_get_default("profile")
     elif command == "install-service":
-        require_commands(["systemctl"])
-        run_install_service()
+        init_system = detect_init_system()
+        if init_system == "systemd":
+            require_non_root()
+            run_install_service()
+        elif init_system == "openrc-user":
+            require_non_root()
+            run_install_openrc_user_service()
+        elif init_system == "openrc-system":
+            require_root()
+            run_install_openrc_service()
+        else:
+            warn("Error: No supported init system found.")
+            warn("aproman requires either systemd or OpenRC.")
+            sys.exit(1)
     elif command == "list-cards":
         require_commands(["pactl"])
         run_list_cards(args)
@@ -52,10 +71,22 @@ def main():
     elif command == "set-default-profile":
         run_set_default("profile", args.value)
     elif command == "uninstall-service":
-        require_commands(["systemctl"])
-        run_uninstall_service()
+        init_system = detect_init_system()
+        if init_system == "systemd":
+            require_non_root()
+            run_uninstall_service()
+        elif init_system == "openrc-user":
+            require_non_root()
+            run_uninstall_openrc_user_service()
+        elif init_system == "openrc-system":
+            require_root()
+            run_uninstall_openrc_service()
+        else:
+            warn("Error: No supported init system found.")
+            warn("aproman requires either systemd or OpenRC.")
+            sys.exit(1)
     else:
-        require_commands(["dbus-monitor", "pactl", "systemctl"])
+        require_commands(["dbus-monitor", "pactl"])
         run_daemon(args)
 
 
@@ -127,7 +158,6 @@ def run_get_default(key):
 
 
 def run_set_default(key, value):
-    require_commands(["systemctl"])
     flag = f"--{key}"
     flag_prefix = f"{flag}="
     lines = []
@@ -155,24 +185,48 @@ def run_set_default(key, value):
 
 def signal_daemon():
     try:
+        send_command("reload")
+        log("Signaled daemon to reload config")
+    except OSError:
+        pass
+
+
+def detect_init_system():
+    if shutil.which("systemctl"):
+        return "systemd"
+    if shutil.which("rc-service"):
+        if get_openrc_version() >= (0, 60):
+            return "openrc-user"
+        return "openrc-system"
+    return None
+
+
+def get_openrc_version():
+    try:
         output = subprocess.check_output(
-            ["systemctl", "--user", "show", "aproman.service", "-p", "MainPID"],
+            ["openrc", "--version"],
             text=True,
             stderr=subprocess.DEVNULL,
         )
-    except subprocess.CalledProcessError:
-        return
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return (0, 0)
+    match = re.search(r"(\d+\.\d+(?:\.\d+)?)", output)
+    if not match:
+        return (0, 0)
+    parts = match.group(1).split(".")
+    return tuple(int(p) for p in parts)
 
-    match = re.match(r"MainPID=(\d+)", output.strip())
-    if not match or match.group(1) == "0":
-        return
 
-    pid = int(match.group(1))
-    try:
-        os.kill(pid, signal.SIGHUP)
-        log(f"Sent SIGHUP to aproman daemon (PID {pid})")
-    except OSError as exc:
-        warn(f"Warning: Could not signal daemon (PID {pid}): {exc}")
+def require_root():
+    if os.geteuid() != 0:
+        warn("Error: System-level services require root. Try running with sudo.")
+        sys.exit(1)
+
+
+def require_non_root():
+    if os.geteuid() == 0:
+        warn("Error: User-level services should not be installed as root.")
+        sys.exit(1)
 
 
 def run_install_service():
@@ -211,6 +265,94 @@ def get_service_source():
         return f.read()
 
 
+def run_install_openrc_service():
+    content = get_openrc_system_source()
+    service_path = os.path.join(OPENRC_SYSTEM_INIT_DIR, "aproman")
+
+    match = re.search(r'^command="(.+)"', content, re.MULTILINE)
+    if match and not os.path.exists(match.group(1)):
+        warn(f"Error: aproman not found at {match.group(1)}")
+        warn("The OpenRC system service expects a system-wide installation.")
+        warn("Try: sudo uv pip install --system --break-system-packages aproman")
+        sys.exit(1)
+
+    try:
+        with open(service_path, "w") as f:
+            f.write(content)
+        os.chmod(service_path, 0o755)
+    except PermissionError:
+        warn(f"Error: Permission denied writing to {service_path}")
+        sys.exit(1)
+    log(f"Installed {service_path}")
+
+    subprocess.run(["rc-update", "add", "aproman", "default"], check=True)
+    log("Added aproman to default runlevel")
+
+    log("")
+    log("To start immediately:")
+    log("  rc-service aproman start")
+    log("")
+    log("To check status:")
+    log("  rc-service aproman status")
+
+
+def get_openrc_system_source():
+    try:
+        from importlib.resources import files
+
+        return (files("aproman") / "openrc-system" / "aproman").read_text()
+    except (FileNotFoundError, TypeError, ModuleNotFoundError):
+        pass
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, "openrc-system", "aproman")
+    with open(path) as f:
+        return f.read()
+
+
+def run_install_openrc_user_service():
+    content = get_openrc_user_source()
+    service_dir = OPENRC_USER_INIT_DIR
+    runlevel_dir = os.path.join(
+        os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+        "rc",
+        "runlevels",
+        "default",
+    )
+    service_path = os.path.join(service_dir, "aproman")
+
+    os.makedirs(service_dir, exist_ok=True)
+    with open(service_path, "w") as f:
+        f.write(content)
+    os.chmod(service_path, 0o755)
+    log(f"Installed {service_path}")
+
+    os.makedirs(runlevel_dir, exist_ok=True)
+    subprocess.run(["rc-update", "--user", "add", "aproman", "default"], check=True)
+    log("Added aproman to user default runlevel")
+
+    log("")
+    log("To start immediately:")
+    log("  rc-service --user aproman start")
+    log("")
+    log("To check status:")
+    log("  rc-service --user aproman status")
+
+
+def get_openrc_user_source():
+    try:
+        from importlib.resources import files
+
+        return (files("aproman") / "openrc-user" / "aproman").read_text()
+    except (FileNotFoundError, TypeError, ModuleNotFoundError):
+        pass
+
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, "openrc-user", "aproman")
+    with open(path) as f:
+        return f.read()
+
+
 def run_uninstall_service():
     service_path = os.path.join(SYSTEMD_USER_DIR, "aproman.service")
 
@@ -227,6 +369,39 @@ def run_uninstall_service():
 
     subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)
     log("Uninstalled aproman.service")
+
+
+def run_uninstall_openrc_service():
+    service_path = os.path.join(OPENRC_SYSTEM_INIT_DIR, "aproman")
+
+    subprocess.run(["rc-service", "aproman", "stop"], check=False)
+    subprocess.run(["rc-update", "del", "aproman", "default"], check=False)
+
+    try:
+        os.remove(service_path)
+        log(f"Removed {service_path}")
+    except FileNotFoundError:
+        log(f"No init script at {service_path}")
+    except PermissionError:
+        warn(f"Error: Permission denied removing {service_path}")
+        sys.exit(1)
+
+    log("Uninstalled aproman service")
+
+
+def run_uninstall_openrc_user_service():
+    service_path = os.path.join(OPENRC_USER_INIT_DIR, "aproman")
+
+    subprocess.run(["rc-service", "--user", "aproman", "stop"], check=False)
+    subprocess.run(["rc-update", "--user", "del", "aproman", "default"], check=False)
+
+    try:
+        os.remove(service_path)
+        log(f"Removed {service_path}")
+    except FileNotFoundError:
+        log(f"No init script at {service_path}")
+
+    log("Uninstalled aproman user service")
 
 
 def run_cycle(args):
@@ -313,7 +488,7 @@ def run_daemon(args):
 
 
 def reload_conf(state):
-    log(f"{timestamp()} Received SIGHUP, reloading {CONF_PATH}...")
+    log(f"{timestamp()} Reloading config...")
     try:
         file_args = load_conf()
     except SystemExit:
@@ -366,14 +541,14 @@ def parse_args(file_args):
     sub.add_parser("cycle", help="cycle the card profile off and back on once, then exit")
     sub.add_parser("get-default-card", help="print the default card from the config file")
     sub.add_parser("get-default-profile", help="print the default profile from the config file")
-    sub.add_parser("install-service", help="install and enable the systemd user service")
+    sub.add_parser("install-service", help="install and enable the service (systemd or OpenRC)")
     sub.add_parser("list-cards", help="list available audio cards")
     sub.add_parser("list-profiles", help="list available profiles for the card")
     p = sub.add_parser("set-default-card", help="set the default card and signal the daemon")
     p.add_argument("value", metavar="CARD")
     p = sub.add_parser("set-default-profile", help="set the default profile and signal the daemon")
     p.add_argument("value", metavar="PROFILE")
-    sub.add_parser("uninstall-service", help="disable and remove the systemd user service")
+    sub.add_parser("uninstall-service", help="disable and remove the service (systemd or OpenRC)")
 
     args = parser.parse_args()
 
@@ -537,6 +712,26 @@ def handle_cycle_command(state, command):
     cycle_profile(card_name, profile)
 
 
+def restart_pipewire():
+    if shutil.which("systemctl"):
+        subprocess.run(["systemctl", "--user", "restart", "pipewire.service"], check=True)
+        subprocess.run(["systemctl", "--user", "restart", "pipewire-pulse.service"], check=True)
+        return
+
+    if shutil.which("rc-service"):
+        try:
+            subprocess.run(["rc-service", "--user", "pipewire", "restart"], check=True)
+        except subprocess.CalledProcessError:
+            subprocess.run(["rc-service", "pipewire", "restart"], check=False)
+        try:
+            subprocess.run(["rc-service", "--user", "pipewire-pulse", "restart"], check=True)
+        except subprocess.CalledProcessError:
+            subprocess.run(["rc-service", "pipewire-pulse", "restart"], check=False)
+        return
+
+    warn("Warning: No service manager found to restart PipeWire. Proceeding with profile cycle only.")
+
+
 def cycle_profile(card_name, target_profile):
     current_profile = get_active_profile(card_name)
     if not current_profile:
@@ -544,8 +739,7 @@ def cycle_profile(card_name, target_profile):
         return
 
     log("Restarting pipewire and pipewire-pulse")
-    subprocess.run(["systemctl", "--user", "restart", "pipewire.service"], check=True)
-    subprocess.run(["systemctl", "--user", "restart", "pipewire-pulse.service"], check=True)
+    restart_pipewire()
 
     log(f"Cycling profile on {card_name}: {current_profile} -> off -> {target_profile}")
     if not set_card_profile(card_name, "off", attempts=20, retry_delay=0.25):
@@ -600,6 +794,8 @@ def send_command(command):
 
 def decode_command(data):
     command = data.decode().strip()
+    if command == "reload":
+        return command
     if not command.startswith("cycle"):
         raise ValueError(f"Unsupported command: {command}")
     return command
@@ -637,7 +833,10 @@ def monitor_loop(wake_delay, state, server):
                     try:
                         data = server.recv(256)
                         command = decode_command(data)
-                        handle_cycle_command(state, command)
+                        if command == "reload":
+                            reload_conf(state)
+                        else:
+                            handle_cycle_command(state, command)
                     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
                         warn(f"Warning: {exc}")
                 elif fd == dbus_fd:

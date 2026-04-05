@@ -17,4 +17,9 @@ aproman = "aproman:main"
 packages = ["aproman"]
 
 [tool.hatch.build.targets.wheel.force-include]
+"openrc-system/aproman" = "aproman/openrc-system/aproman"
+"openrc-user/aproman" = "aproman/openrc-user/aproman"
 "systemd/aproman.service" = "aproman/systemd/aproman.service"
+
+[tool.ty.rules]
+all = "error"

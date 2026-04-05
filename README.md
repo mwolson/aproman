@@ -13,10 +13,10 @@ rebuild of the audio nodes.
 
 ## How It Works
 
-`aproman` runs as a user systemd service and:
+`aproman` runs as a service (systemd or OpenRC) and:
 
 1. Auto-detects your HDMI audio card, or uses the one saved in the config file
-2. Monitors D-Bus for `PrepareForSleep` signals from systemd-logind
+2. Monitors D-Bus for `PrepareForSleep` signals from systemd-logind (or elogind)
 3. On wake, waits briefly for HDMI to renegotiate, then cycles the card profile
    off and back on
 
@@ -28,8 +28,7 @@ without manual intervention.
 - PipeWire with WirePlumber, or PulseAudio compatibility via PipeWire
 - `pactl`
 - `dbus-monitor`
-- `systemctl`
-- A systemd-based Linux distribution
+- A Linux distribution with systemd or OpenRC (elogind for OpenRC)
 
 ## Installation
 
@@ -38,11 +37,26 @@ without manual intervention.
 ```bash
 uv tool install aproman
 aproman install-service
-systemctl --user start aproman.service
 ```
 
-This installs `aproman` to `~/.local/bin/`, copies the systemd user service into
-place, and enables it.
+The `install-service` command auto-detects the init system:
+
+- **systemd**: installs a user service, enables it
+- **OpenRC 0.60+**: installs a user init script
+- **OpenRC (older)**: installs a system init script (requires root)
+
+Then start the service:
+
+```bash
+# systemd
+systemctl --user start aproman.service
+
+# OpenRC (user)
+rc-service --user aproman start
+
+# OpenRC (system)
+rc-service aproman start
+```
 
 ### Alternative: install.sh
 
@@ -78,8 +92,15 @@ its active profile at startup.
 The service runs automatically. To check status:
 
 ```bash
+# systemd
 systemctl --user status aproman.service
 journalctl --user -u aproman.service -f
+
+# OpenRC (user)
+rc-service --user aproman status
+
+# OpenRC (system)
+rc-service aproman status
 ```
 
 ### Commands
@@ -92,12 +113,12 @@ aproman                              Run as a daemon (default)
 aproman cycle                        Cycle the card profile off and back on
 aproman get-default-card             Print the default card from the config file
 aproman get-default-profile          Print the default profile from the config file
-aproman install-service              Install and enable the systemd user service
+aproman install-service              Install and enable the service (systemd or OpenRC)
 aproman list-cards                   List available audio cards
 aproman list-profiles                List available profiles for the card
 aproman set-default-card CARD        Save default card and signal the daemon
 aproman set-default-profile PROFILE  Save default profile and signal the daemon
-aproman uninstall-service            Disable and remove the systemd user service
+aproman uninstall-service            Disable and remove the service (systemd or OpenRC)
 ```
 
 ### Daemon options
@@ -123,9 +144,10 @@ These flags apply to the daemon and to `cycle`:
 Only `--card` and `--profile` are supported. Unrecognized flags cause an error
 at startup. Command-line arguments always take precedence over the config file.
 
-When the daemon receives a SIGHUP (sent automatically by `set-default-card` and
-`set-default-profile`, or manually via `kill -HUP`), it reloads the config file
-and updates the card and profile for future suspend/resume cycles.
+When the daemon receives a reload signal (sent automatically by
+`set-default-card` and `set-default-profile` via the Unix socket, or manually
+via `kill -HUP`), it reloads the config file and updates the card and profile
+for future suspend/resume cycles.
 
 ### One-Shot Fix
 
@@ -164,14 +186,16 @@ rm -f ~/.config/aproman.conf
 ## Testing
 
 ```bash
-python3 -m unittest discover -s tests -v
+bun run test                # unit tests
+bun run test:integration    # Docker-based integration tests
+bun run test:all            # both
 ```
 
 ## Hooks
 
 ```bash
-lefthook install
-lefthook run pre-commit --all-files
+bun run hooks:check         # run checks against working tree
+lefthook install            # install git hooks
 ```
 
 The pre-commit hook runs `uvx ruff check`, `uvx ty check`, and the unit test

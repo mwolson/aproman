@@ -1,0 +1,21 @@
+#!/bin/bash
+case "$1" in
+    list)
+        cat << 'EOF'
+Card #0
+	Name: alsa_card.pci-0000_01_00.1
+	Active Profile: output:hdmi-stereo
+	Properties:
+		alsa.card_name = "HDA NVidia"
+	Profiles:
+		output:hdmi-stereo: Digital Stereo (HDMI) Output (sinks: 1, sources: 0, priority: 5900, available: yes)
+		off: Off (sinks: 0, sources: 0, priority: 0, available: yes)
+	ports:
+		hdmi-output-0: HDMI / DisplayPort 1
+			Properties:
+				port.type = "hdmi"
+EOF
+        ;;
+    set-card-profile)
+        ;;
+esac

@@ -105,26 +105,20 @@ class ApromanTests(unittest.TestCase):
 
     @mock.patch.object(APROMAN.time, "sleep")
     @mock.patch.object(APROMAN, "set_card_profile", side_effect=[True, True])
-    @mock.patch.object(APROMAN.subprocess, "run")
+    @mock.patch.object(APROMAN, "restart_pipewire")
     @mock.patch.object(APROMAN, "get_active_profile", return_value="pro-audio")
     @mock.patch("builtins.print")
-    def test_cycle_profile_restarts_services_then_restores_profile(
+    def test_cycle_profile_restarts_pipewire_then_restores_profile(
         self,
         _print,
         _get_active_profile,
-        run_mock,
+        restart_pipewire_mock,
         set_card_profile_mock,
         sleep_mock,
     ):
         APROMAN.cycle_profile("alsa_card.pci-0000_01_00.1", "output:hdmi-stereo")
 
-        self.assertEqual(
-            [
-                mock.call(["systemctl", "--user", "restart", "pipewire.service"], check=True),
-                mock.call(["systemctl", "--user", "restart", "pipewire-pulse.service"], check=True),
-            ],
-            run_mock.call_args_list,
-        )
+        restart_pipewire_mock.assert_called_once()
         self.assertEqual(
             [
                 mock.call("alsa_card.pci-0000_01_00.1", "off", attempts=20, retry_delay=0.25),
@@ -157,6 +151,9 @@ class ApromanTests(unittest.TestCase):
     def test_decode_command_accepts_cycle(self):
         self.assertEqual("cycle", APROMAN.decode_command(b"cycle"))
         self.assertEqual("cycle pro-audio", APROMAN.decode_command(b"cycle pro-audio"))
+
+    def test_decode_command_accepts_reload(self):
+        self.assertEqual("reload", APROMAN.decode_command(b"reload"))
 
     def test_decode_command_rejects_unknown(self):
         with self.assertRaises(ValueError):
@@ -388,8 +385,7 @@ class ConfTests(unittest.TestCase):
         APROMAN.reload_conf(state)
         self.assertEqual("cli-card", state["card_name"])
 
-    @mock.patch("builtins.print")
-    def test_conf_profile_used_as_default_in_parse_args(self, _print):
+    def test_conf_profile_used_as_default_in_parse_args(self):
         with open(APROMAN.CONF_PATH, "w") as f:
             f.write("--profile=conf-profile\n")
         file_args = APROMAN.load_conf()
@@ -398,8 +394,7 @@ class ConfTests(unittest.TestCase):
         self.assertEqual("conf-profile", args.profile)
         self.assertIsNone(args.cli_profile)
 
-    @mock.patch("builtins.print")
-    def test_conf_card_used_as_default_in_parse_args(self, _print):
+    def test_conf_card_used_as_default_in_parse_args(self):
         with open(APROMAN.CONF_PATH, "w") as f:
             f.write("--card=conf-card\n")
         file_args = APROMAN.load_conf()
@@ -408,8 +403,7 @@ class ConfTests(unittest.TestCase):
         self.assertEqual("conf-card", args.card)
         self.assertIsNone(args.cli_card)
 
-    @mock.patch("builtins.print")
-    def test_cli_profile_overrides_conf(self, _print):
+    def test_cli_profile_overrides_conf(self):
         with open(APROMAN.CONF_PATH, "w") as f:
             f.write("--profile=conf-profile\n")
         file_args = APROMAN.load_conf()
@@ -418,8 +412,7 @@ class ConfTests(unittest.TestCase):
         self.assertEqual("cli-profile", args.profile)
         self.assertEqual("cli-profile", args.cli_profile)
 
-    @mock.patch("builtins.print")
-    def test_cli_card_overrides_conf(self, _print):
+    def test_cli_card_overrides_conf(self):
         with open(APROMAN.CONF_PATH, "w") as f:
             f.write("--card=conf-card\n")
         file_args = APROMAN.load_conf()
@@ -427,6 +420,83 @@ class ConfTests(unittest.TestCase):
             args = APROMAN.parse_args(file_args)
         self.assertEqual("cli-card", args.card)
         self.assertEqual("cli-card", args.cli_card)
+
+
+class InitSystemTests(unittest.TestCase):
+    @mock.patch.object(APROMAN.shutil, "which", side_effect=lambda cmd: "/usr/bin/systemctl" if cmd == "systemctl" else None)
+    def test_detect_init_system_systemd(self, _which):
+        self.assertEqual("systemd", APROMAN.detect_init_system())
+
+    @mock.patch.object(APROMAN.shutil, "which", side_effect=lambda cmd: "/usr/bin/rc-service" if cmd == "rc-service" else None)
+    @mock.patch.object(APROMAN, "get_openrc_version", return_value=(0, 60))
+    def test_detect_init_system_openrc_user(self, _version, _which):
+        self.assertEqual("openrc-user", APROMAN.detect_init_system())
+
+    @mock.patch.object(APROMAN.shutil, "which", side_effect=lambda cmd: "/usr/bin/rc-service" if cmd == "rc-service" else None)
+    @mock.patch.object(APROMAN, "get_openrc_version", return_value=(0, 54))
+    def test_detect_init_system_openrc_system(self, _version, _which):
+        self.assertEqual("openrc-system", APROMAN.detect_init_system())
+
+    @mock.patch.object(APROMAN.shutil, "which", return_value=None)
+    def test_detect_init_system_none(self, _which):
+        self.assertIsNone(APROMAN.detect_init_system())
+
+    @mock.patch.object(APROMAN.subprocess, "check_output", return_value="openrc (OpenRC) 0.60.1\n")
+    def test_get_openrc_version_parses_output(self, _check_output):
+        self.assertEqual((0, 60, 1), APROMAN.get_openrc_version())
+
+    @mock.patch.object(APROMAN.subprocess, "check_output", side_effect=FileNotFoundError)
+    def test_get_openrc_version_returns_zero_when_missing(self, _check_output):
+        self.assertEqual((0, 0), APROMAN.get_openrc_version())
+
+    @mock.patch.object(APROMAN.os, "geteuid", return_value=1000)
+    def test_require_root_fails_as_non_root(self, _geteuid):
+        with self.assertRaises(SystemExit):
+            APROMAN.require_root()
+
+    @mock.patch.object(APROMAN.os, "geteuid", return_value=0)
+    def test_require_root_passes_as_root(self, _geteuid):
+        APROMAN.require_root()
+
+    @mock.patch.object(APROMAN.os, "geteuid", return_value=0)
+    def test_require_non_root_fails_as_root(self, _geteuid):
+        with self.assertRaises(SystemExit):
+            APROMAN.require_non_root()
+
+    @mock.patch.object(APROMAN.os, "geteuid", return_value=1000)
+    def test_require_non_root_passes_as_non_root(self, _geteuid):
+        APROMAN.require_non_root()
+
+
+class RestartPipewireTests(unittest.TestCase):
+    @mock.patch.object(APROMAN.subprocess, "run")
+    @mock.patch.object(APROMAN.shutil, "which", side_effect=lambda cmd: "/usr/bin/systemctl" if cmd == "systemctl" else None)
+    def test_restart_pipewire_uses_systemctl(self, _which, run_mock):
+        APROMAN.restart_pipewire()
+        self.assertEqual(
+            [
+                mock.call(["systemctl", "--user", "restart", "pipewire.service"], check=True),
+                mock.call(["systemctl", "--user", "restart", "pipewire-pulse.service"], check=True),
+            ],
+            run_mock.call_args_list,
+        )
+
+    @mock.patch.object(APROMAN.subprocess, "run")
+    @mock.patch.object(APROMAN.shutil, "which", side_effect=lambda cmd: "/usr/bin/rc-service" if cmd == "rc-service" else None)
+    def test_restart_pipewire_uses_openrc(self, _which, run_mock):
+        APROMAN.restart_pipewire()
+        self.assertEqual(
+            [
+                mock.call(["rc-service", "--user", "pipewire", "restart"], check=True),
+                mock.call(["rc-service", "--user", "pipewire-pulse", "restart"], check=True),
+            ],
+            run_mock.call_args_list,
+        )
+
+    @mock.patch("builtins.print")
+    @mock.patch.object(APROMAN.shutil, "which", return_value=None)
+    def test_restart_pipewire_warns_when_no_service_manager(self, _which, _print):
+        APROMAN.restart_pipewire()
 
 
 class ServiceTests(unittest.TestCase):
@@ -448,6 +518,32 @@ class ServiceTests(unittest.TestCase):
     def test_get_service_source_matches_repo_file(self):
         content = APROMAN.get_service_source()
         repo_path = ROOT / "systemd" / "aproman.service"
+        with open(repo_path) as f:
+            expected = f.read()
+        self.assertEqual(expected, content)
+
+    def test_get_openrc_system_source_returns_valid_script(self):
+        content = APROMAN.get_openrc_system_source()
+        self.assertIn("#!/sbin/openrc-run", content)
+        self.assertIn("command=", content)
+        self.assertIn("depend()", content)
+
+    def test_get_openrc_system_source_matches_repo_file(self):
+        content = APROMAN.get_openrc_system_source()
+        repo_path = ROOT / "openrc-system" / "aproman"
+        with open(repo_path) as f:
+            expected = f.read()
+        self.assertEqual(expected, content)
+
+    def test_get_openrc_user_source_returns_valid_script(self):
+        content = APROMAN.get_openrc_user_source()
+        self.assertIn("#!/sbin/openrc-run", content)
+        self.assertIn("command=", content)
+        self.assertIn("depend()", content)
+
+    def test_get_openrc_user_source_matches_repo_file(self):
+        content = APROMAN.get_openrc_user_source()
+        repo_path = ROOT / "openrc-user" / "aproman"
         with open(repo_path) as f:
             expected = f.read()
         self.assertEqual(expected, content)
@@ -525,6 +621,18 @@ class ServiceTests(unittest.TestCase):
         with mock.patch("sys.argv", ["aproman", "uninstall-service"]):
             args = APROMAN.parse_args({})
         self.assertEqual("uninstall-service", args.command)
+
+
+class SignalDaemonTests(unittest.TestCase):
+    @mock.patch.object(APROMAN, "send_command")
+    @mock.patch("builtins.print")
+    def test_signal_daemon_sends_reload(self, _print, send_mock):
+        APROMAN.signal_daemon()
+        send_mock.assert_called_once_with("reload")
+
+    @mock.patch.object(APROMAN, "send_command", side_effect=OSError("no socket"))
+    def test_signal_daemon_ignores_oserror(self, _send):
+        APROMAN.signal_daemon()
 
 
 if __name__ == "__main__":
