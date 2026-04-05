@@ -32,33 +32,52 @@ without manual intervention.
 
 ## Installation
 
-### Recommended: uv
+### systemd
 
 ```bash
 uv tool install aproman
 aproman install-service
+systemctl --user start aproman.service
 ```
 
-The `install-service` command auto-detects the init system:
+This installs `aproman` to `~/.local/bin/`, copies the systemd user service into
+place, and enables it.
 
-- **systemd**: installs a user service, enables it
-- **OpenRC 0.60+**: installs a user init script
-- **OpenRC (older)**: installs a system init script (requires root)
-
-Then start the service:
+### OpenRC user service (0.60+, Alpine edge, etc.)
 
 ```bash
-# systemd
-systemctl --user start aproman.service
-
-# OpenRC (user)
+uv tool install aproman
+aproman install-service
 rc-service --user aproman start
-
-# OpenRC (system)
-rc-service aproman start
 ```
 
-### Alternative: install.sh
+On OpenRC 0.60 or newer, `install-service` automatically installs a user-level
+service to `~/.config/rc/init.d/aproman`. Make sure `~/.local/bin` is on your
+PATH.
+
+### OpenRC system service (older OpenRC)
+
+```bash
+sudo uv pip install --system --break-system-packages aproman
+sudo aproman install-service
+sudo rc-service aproman start
+```
+
+On OpenRC versions before 0.60, `install-service` installs a system-level init
+script to `/etc/init.d/aproman` and adds it to the default runlevel. The service
+uses `supervise-daemon` for process supervision with automatic restart.
+
+To configure the user and environment for the daemon, create
+`/etc/conf.d/aproman`:
+
+```sh
+command_user="youruser"
+supervise_daemon_args="--env XDG_RUNTIME_DIR=/run/user/1000"
+```
+
+Replace `1000` with your user's UID (`id -u youruser`).
+
+### Alternative: install.sh (systemd)
 
 ```bash
 git clone https://github.com/mwolson/aproman.git
@@ -91,15 +110,22 @@ its active profile at startup.
 
 The service runs automatically. To check status:
 
+#### systemd
+
 ```bash
-# systemd
 systemctl --user status aproman.service
 journalctl --user -u aproman.service -f
+```
 
-# OpenRC (user)
+#### OpenRC (user, 0.60+)
+
+```bash
 rc-service --user aproman status
+```
 
-# OpenRC (system)
+#### OpenRC (system, older)
+
+```bash
 rc-service aproman status
 ```
 
