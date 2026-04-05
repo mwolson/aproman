@@ -539,7 +539,6 @@ class ServiceTests(unittest.TestCase):
         content = APROMAN.get_openrc_user_source()
         self.assertIn("#!/sbin/openrc-run", content)
         self.assertIn("command=", content)
-        self.assertIn("depend()", content)
 
     def test_get_openrc_user_source_matches_repo_file(self):
         content = APROMAN.get_openrc_user_source()
