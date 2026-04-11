@@ -634,5 +634,54 @@ class SignalDaemonTests(unittest.TestCase):
         APROMAN.signal_daemon()
 
 
+class NodeErrorTests(unittest.TestCase):
+    def test_node_error_regex_matches_bluez_error(self):
+        line = 'Apr 10 12:47:52 host pipewire[4029]: pw.node: (bluez_input.74_77_86_8B_31_E5.0-185) running -> error (Received error event)'
+        self.assertIsNotNone(APROMAN.NODE_ERROR_RE.search(line))
+
+    def test_node_error_regex_matches_generic_node_error(self):
+        line = 'pw.node: (alsa_output.pci-0000_01_00.1-57) running -> error (Received error event)'
+        self.assertIsNotNone(APROMAN.NODE_ERROR_RE.search(line))
+
+    def test_node_error_regex_ignores_normal_transitions(self):
+        line = 'pw.node: (bluez_output.test-1) idle -> running'
+        self.assertIsNone(APROMAN.NODE_ERROR_RE.search(line))
+
+    def test_node_error_regex_ignores_unrelated_lines(self):
+        line = 'mod.profiler: queue full 512 < 2688'
+        self.assertIsNone(APROMAN.NODE_ERROR_RE.search(line))
+
+    @mock.patch.object(APROMAN, "restart_pipewire")
+    @mock.patch("builtins.print")
+    def test_handle_node_error_restarts_pipewire(self, _print, restart_mock):
+        state = {"last_pipewire_restart": 0.0}
+        APROMAN.handle_node_error(state, "pw.node: (bluez_input.test-1) running -> error")
+        restart_mock.assert_called_once()
+
+    @mock.patch.object(APROMAN, "restart_pipewire")
+    @mock.patch("builtins.print")
+    def test_handle_node_error_respects_cooldown(self, _print, restart_mock):
+        state = {"last_pipewire_restart": APROMAN.time.monotonic()}
+        APROMAN.handle_node_error(state, "pw.node: (bluez_input.test-1) running -> error")
+        restart_mock.assert_not_called()
+
+    @mock.patch.object(APROMAN, "restart_pipewire")
+    @mock.patch("builtins.print")
+    def test_handle_node_error_updates_timestamp(self, _print, _restart):
+        state = {"last_pipewire_restart": 0.0}
+        before = APROMAN.time.monotonic()
+        APROMAN.handle_node_error(state, "pw.node: test running -> error")
+        self.assertGreaterEqual(state["last_pipewire_restart"], before)
+
+    @mock.patch.object(APROMAN.shutil, "which", return_value=None)
+    def test_spawn_journal_monitor_returns_none_without_journalctl(self, _which):
+        self.assertIsNone(APROMAN.spawn_journal_monitor())
+
+    @mock.patch.object(APROMAN.subprocess, "Popen", side_effect=OSError("exec failed"))
+    @mock.patch.object(APROMAN.shutil, "which", return_value="/usr/bin/journalctl")
+    def test_spawn_journal_monitor_returns_none_on_exec_failure(self, _which, _popen):
+        self.assertIsNone(APROMAN.spawn_journal_monitor())
+
+
 if __name__ == "__main__":
     unittest.main()

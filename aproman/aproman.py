@@ -16,6 +16,9 @@ VERSION = "0.4.1"
 
 ALLOWED_CONF_FLAGS = {"--card", "--profile"}
 
+NODE_ERROR_RE = re.compile(r"pw\.node:.*running -> error")
+RESTART_COOLDOWN = 30.0
+
 CONF_PATH = os.path.join(
     os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
     "aproman.conf",
@@ -704,6 +707,19 @@ def handle_resume(state, wake_delay):
     cycle_profile(card_name, profile)
 
 
+def handle_node_error(state, line):
+    now = time.monotonic()
+    last = state.get("last_pipewire_restart", 0.0)
+    if now - last < RESTART_COOLDOWN:
+        log(f"{timestamp()} Node error detected but within cooldown, skipping restart.")
+        return
+
+    log(f"{timestamp()} PipeWire node error detected: {line.strip()}")
+    log(f"{timestamp()} Restarting PipeWire to recover...")
+    state["last_pipewire_restart"] = now
+    restart_pipewire()
+
+
 def handle_cycle_command(state, command):
     parts = command.split(None, 1)
     profile = parts[1] if len(parts) > 1 else state["profile"]
@@ -801,13 +817,33 @@ def decode_command(data):
     return command
 
 
+def spawn_journal_monitor():
+    if not shutil.which("journalctl"):
+        return None
+    try:
+        proc = subprocess.Popen(
+            ["journalctl", "--user", "-u", "pipewire", "-f", "-n", "0", "--no-pager"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
+        )
+        if proc.stdout is None:
+            proc.terminate()
+            return None
+        log("Monitoring PipeWire journal for node errors...")
+        return proc
+    except OSError:
+        return None
+
+
 def monitor_loop(wake_delay, state, server):
     dbus_filter = (
         "interface=org.freedesktop.login1.Manager,"
         "sender=org.freedesktop.login1,"
         "member=PrepareForSleep"
     )
-    process = subprocess.Popen(
+    dbus_proc = subprocess.Popen(
         ["dbus-monitor", "--system", "--monitor", dbus_filter],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -815,16 +851,24 @@ def monitor_loop(wake_delay, state, server):
         bufsize=1,
     )
 
-    assert process.stdout is not None
-    dbus_fd = process.stdout.fileno()
+    journal_proc = spawn_journal_monitor()
+
+    assert dbus_proc.stdout is not None
+    dbus_fd = dbus_proc.stdout.fileno()
+    journal_fd = journal_proc.stdout.fileno() if journal_proc and journal_proc.stdout else None
     sock_fd = server.fileno()
     expect_state = False
     dbus_buffer = ""
+    journal_buffer = ""
+
+    watch_fds = [dbus_fd, sock_fd]
+    if journal_fd is not None:
+        watch_fds.append(journal_fd)
 
     try:
         while True:
             try:
-                readable, _, _ = select.select([dbus_fd, sock_fd], [], [])
+                readable, _, _ = select.select(watch_fds, [], [])
             except InterruptedError:
                 continue
 
@@ -860,10 +904,24 @@ def monitor_loop(wake_delay, state, server):
                             handle_resume(state, wake_delay)
                         else:
                             log(f"{timestamp()} Unknown state after PrepareForSleep: {line}")
+                elif fd == journal_fd:
+                    chunk = os.read(journal_fd, 4096)
+                    if not chunk:
+                        watch_fds = [f for f in watch_fds if f != journal_fd]
+                        journal_fd = None
+                        continue
+                    journal_buffer += chunk.decode()
+                    while "\n" in journal_buffer:
+                        raw_line, journal_buffer = journal_buffer.split("\n", 1)
+                        if NODE_ERROR_RE.search(raw_line):
+                            handle_node_error(state, raw_line)
     finally:
-        if process.poll() is None:
-            process.terminate()
-            process.wait(timeout=5)
+        if dbus_proc.poll() is None:
+            dbus_proc.terminate()
+            dbus_proc.wait(timeout=5)
+        if journal_proc and journal_proc.poll() is None:
+            journal_proc.terminate()
+            journal_proc.wait(timeout=5)
 
 
 def timestamp():
