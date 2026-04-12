@@ -861,7 +861,7 @@ def monitor_loop(wake_delay, state, server):
     dbus_buffer = ""
     journal_buffer = ""
 
-    watch_fds = [dbus_fd, sock_fd]
+    watch_fds: list[int] = [dbus_fd, sock_fd]
     if journal_fd is not None:
         watch_fds.append(journal_fd)
 
@@ -904,7 +904,7 @@ def monitor_loop(wake_delay, state, server):
                             handle_resume(state, wake_delay)
                         else:
                             log(f"{timestamp()} Unknown state after PrepareForSleep: {line}")
-                elif fd == journal_fd:
+                elif journal_fd is not None and fd == journal_fd:
                     chunk = os.read(journal_fd, 4096)
                     if not chunk:
                         watch_fds = [f for f in watch_fds if f != journal_fd]
