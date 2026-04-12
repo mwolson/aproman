@@ -19,6 +19,9 @@ rebuild of the audio nodes.
 2. Monitors D-Bus for `PrepareForSleep` signals from systemd-logind (or elogind)
 3. On wake, waits briefly for HDMI to renegotiate, then cycles the card profile
    off and back on
+4. Monitors PipeWire via `pw-dump` for nodes entering an error state, and
+   automatically restarts PipeWire to recover (with a 30-second cooldown to
+   prevent restart loops)
 
 This forces PipeWire and WirePlumber to rebuild fresh nodes, restoring audio
 without manual intervention.
@@ -28,6 +31,7 @@ without manual intervention.
 - PipeWire with WirePlumber, or PulseAudio compatibility via PipeWire
 - `pactl`
 - `dbus-monitor`
+- `pw-dump` (optional, for node error monitoring)
 - A Linux distribution with systemd or OpenRC (elogind for OpenRC)
 
 ## Installation
