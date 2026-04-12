@@ -635,34 +635,18 @@ class SignalDaemonTests(unittest.TestCase):
 
 
 class NodeErrorTests(unittest.TestCase):
-    def test_node_error_regex_matches_bluez_error(self):
-        line = 'Apr 10 12:47:52 host pipewire[4029]: pw.node: (bluez_input.74_77_86_8B_31_E5.0-185) running -> error (Received error event)'
-        self.assertIsNotNone(APROMAN.NODE_ERROR_RE.search(line))
-
-    def test_node_error_regex_matches_generic_node_error(self):
-        line = 'pw.node: (alsa_output.pci-0000_01_00.1-57) running -> error (Received error event)'
-        self.assertIsNotNone(APROMAN.NODE_ERROR_RE.search(line))
-
-    def test_node_error_regex_ignores_normal_transitions(self):
-        line = 'pw.node: (bluez_output.test-1) idle -> running'
-        self.assertIsNone(APROMAN.NODE_ERROR_RE.search(line))
-
-    def test_node_error_regex_ignores_unrelated_lines(self):
-        line = 'mod.profiler: queue full 512 < 2688'
-        self.assertIsNone(APROMAN.NODE_ERROR_RE.search(line))
-
     @mock.patch.object(APROMAN, "restart_pipewire")
     @mock.patch("builtins.print")
     def test_handle_node_error_restarts_pipewire(self, _print, restart_mock):
         state = {"last_pipewire_restart": 0.0}
-        APROMAN.handle_node_error(state, "pw.node: (bluez_input.test-1) running -> error")
+        APROMAN.handle_node_error(state, "node bluez_input.test-1 entered error state")
         restart_mock.assert_called_once()
 
     @mock.patch.object(APROMAN, "restart_pipewire")
     @mock.patch("builtins.print")
     def test_handle_node_error_respects_cooldown(self, _print, restart_mock):
         state = {"last_pipewire_restart": APROMAN.time.monotonic()}
-        APROMAN.handle_node_error(state, "pw.node: (bluez_input.test-1) running -> error")
+        APROMAN.handle_node_error(state, "node bluez_input.test-1 entered error state")
         restart_mock.assert_not_called()
 
     @mock.patch.object(APROMAN, "restart_pipewire")
@@ -670,17 +654,112 @@ class NodeErrorTests(unittest.TestCase):
     def test_handle_node_error_updates_timestamp(self, _print, _restart):
         state = {"last_pipewire_restart": 0.0}
         before = APROMAN.time.monotonic()
-        APROMAN.handle_node_error(state, "pw.node: test running -> error")
+        APROMAN.handle_node_error(state, "node test entered error state")
         self.assertGreaterEqual(state["last_pipewire_restart"], before)
 
     @mock.patch.object(APROMAN.shutil, "which", return_value=None)
-    def test_spawn_journal_monitor_returns_none_without_journalctl(self, _which):
-        self.assertIsNone(APROMAN.spawn_journal_monitor())
+    def test_spawn_pw_monitor_returns_none_without_pw_dump(self, _which):
+        self.assertIsNone(APROMAN.spawn_pw_monitor())
 
     @mock.patch.object(APROMAN.subprocess, "Popen", side_effect=OSError("exec failed"))
-    @mock.patch.object(APROMAN.shutil, "which", return_value="/usr/bin/journalctl")
-    def test_spawn_journal_monitor_returns_none_on_exec_failure(self, _which, _popen):
-        self.assertIsNone(APROMAN.spawn_journal_monitor())
+    @mock.patch.object(APROMAN.shutil, "which", return_value="/usr/bin/pw-dump")
+    def test_spawn_pw_monitor_returns_none_on_exec_failure(self, _which, _popen):
+        self.assertIsNone(APROMAN.spawn_pw_monitor())
+
+
+class ExtractPwErrorsTests(unittest.TestCase):
+    def _node_json(self, node_id, name, state):
+        return {
+            "id": node_id,
+            "type": "PipeWire:Interface:Node",
+            "info": {
+                "state": state,
+                "props": {"node.name": name},
+            },
+        }
+
+    def test_skips_initial_dump(self):
+        import json
+        initial = json.dumps([self._node_json(1, "test", "error")])
+        seen = set()
+        buf, done, errors = APROMAN.extract_pw_errors(initial, False, seen)
+        self.assertTrue(done)
+        self.assertEqual(errors, [])
+
+    def test_initial_dump_seeds_seen_set(self):
+        import json
+        initial = json.dumps([self._node_json(1, "test", "error")])
+        seen = set()
+        APROMAN.extract_pw_errors(initial, False, seen)
+        self.assertIn(1, seen)
+
+    def test_detects_error_after_initial(self):
+        import json
+        initial = json.dumps([self._node_json(1, "test", "running")])
+        change = json.dumps([self._node_json(1, "test", "error")])
+        seen = set()
+        buf, done, errors = APROMAN.extract_pw_errors(initial + change, False, seen)
+        self.assertTrue(done)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("test", errors[0])
+
+    def test_suppresses_duplicate_error_for_same_node(self):
+        import json
+        initial = json.dumps([])
+        change1 = json.dumps([self._node_json(1, "test", "error")])
+        change2 = json.dumps([self._node_json(1, "test", "error")])
+        seen = set()
+        buf, done, errors = APROMAN.extract_pw_errors(
+            initial + change1 + change2, False, seen
+        )
+        self.assertEqual(len(errors), 1)
+
+    def test_re_reports_after_recovery(self):
+        import json
+        seen = set()
+        initial = json.dumps([])
+        err = json.dumps([self._node_json(1, "test", "error")])
+        APROMAN.extract_pw_errors(initial + err, False, seen)
+        self.assertIn(1, seen)
+        recover = json.dumps([self._node_json(1, "test", "running")])
+        APROMAN.extract_pw_errors(recover, True, seen)
+        self.assertNotIn(1, seen)
+        err2 = json.dumps([self._node_json(1, "test", "error")])
+        _, _, errors = APROMAN.extract_pw_errors(err2, True, seen)
+        self.assertEqual(len(errors), 1)
+
+    def test_ignores_non_error_state(self):
+        import json
+        initial = json.dumps([])
+        change = json.dumps([self._node_json(1, "test", "running")])
+        seen = set()
+        buf, done, errors = APROMAN.extract_pw_errors(initial + change, False, seen)
+        self.assertEqual(errors, [])
+
+    def test_ignores_non_node_types(self):
+        import json
+        initial = json.dumps([])
+        change = json.dumps([{"id": 1, "type": "PipeWire:Interface:Link", "info": {"state": "error"}}])
+        seen = set()
+        buf, done, errors = APROMAN.extract_pw_errors(initial + change, False, seen)
+        self.assertEqual(errors, [])
+
+    def test_returns_incomplete_buffer(self):
+        seen = set()
+        buf, done, errors = APROMAN.extract_pw_errors("[{", False, seen)
+        self.assertFalse(done)
+        self.assertEqual(errors, [])
+        self.assertEqual(buf, "[{")
+
+    def test_falls_back_to_id_when_no_node_name(self):
+        import json
+        initial = json.dumps([])
+        node = {"id": 42, "type": "PipeWire:Interface:Node", "info": {"state": "error", "props": {}}}
+        change = json.dumps([node])
+        seen = set()
+        buf, done, errors = APROMAN.extract_pw_errors(initial + change, False, seen)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("id=42", errors[0])
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import select
@@ -12,11 +13,10 @@ import subprocess
 import sys
 import time
 
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 
 ALLOWED_CONF_FLAGS = {"--card", "--profile"}
 
-NODE_ERROR_RE = re.compile(r"pw\.node:.*running -> error")
 RESTART_COOLDOWN = 30.0
 
 CONF_PATH = os.path.join(
@@ -817,24 +817,56 @@ def decode_command(data):
     return command
 
 
-def spawn_journal_monitor():
-    if not shutil.which("journalctl"):
+def spawn_pw_monitor():
+    if not shutil.which("pw-dump"):
         return None
     try:
         proc = subprocess.Popen(
-            ["journalctl", "--user", "-u", "pipewire", "-f", "-n", "0", "--no-pager"],
+            ["pw-dump", "--monitor", "--no-colors"],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
         )
         if proc.stdout is None:
             proc.terminate()
             return None
-        log("Monitoring PipeWire journal for node errors...")
+        log("Monitoring PipeWire for node errors...")
         return proc
     except OSError:
         return None
+
+
+def extract_pw_errors(buffer, initial_done, seen_error_ids):
+    decoder = json.JSONDecoder()
+    errors = []
+    while True:
+        stripped = buffer.lstrip()
+        if not stripped:
+            return "", initial_done, errors
+        try:
+            obj, end = decoder.raw_decode(stripped)
+        except json.JSONDecodeError:
+            return stripped, initial_done, errors
+        buffer = stripped[end:]
+        if not isinstance(obj, list):
+            continue
+        for item in obj:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "PipeWire:Interface:Node":
+                continue
+            node_id = item.get("id")
+            info = item.get("info", {})
+            state = info.get("state")
+            if state == "error":
+                if initial_done and node_id not in seen_error_ids:
+                    props = info.get("props", {})
+                    node_name = props.get("node.name", f"id={node_id}")
+                    errors.append(f"node {node_name} entered error state")
+                seen_error_ids.add(node_id)
+            else:
+                seen_error_ids.discard(node_id)
+        if not initial_done:
+            initial_done = True
 
 
 def monitor_loop(wake_delay, state, server):
@@ -851,19 +883,21 @@ def monitor_loop(wake_delay, state, server):
         bufsize=1,
     )
 
-    journal_proc = spawn_journal_monitor()
+    pw_proc = spawn_pw_monitor()
 
     assert dbus_proc.stdout is not None
     dbus_fd = dbus_proc.stdout.fileno()
-    journal_fd = journal_proc.stdout.fileno() if journal_proc and journal_proc.stdout else None
+    pw_fd = pw_proc.stdout.fileno() if pw_proc and pw_proc.stdout else None
     sock_fd = server.fileno()
     expect_state = False
     dbus_buffer = ""
-    journal_buffer = ""
+    pw_buffer = ""
+    pw_initial_done = False
+    pw_seen_errors: set[int] = set()
 
     watch_fds: list[int] = [dbus_fd, sock_fd]
-    if journal_fd is not None:
-        watch_fds.append(journal_fd)
+    if pw_fd is not None:
+        watch_fds.append(pw_fd)
 
     try:
         while True:
@@ -904,24 +938,25 @@ def monitor_loop(wake_delay, state, server):
                             handle_resume(state, wake_delay)
                         else:
                             log(f"{timestamp()} Unknown state after PrepareForSleep: {line}")
-                elif journal_fd is not None and fd == journal_fd:
-                    chunk = os.read(journal_fd, 4096)
+                elif pw_fd is not None and fd == pw_fd:
+                    chunk = os.read(pw_fd, 4096)
                     if not chunk:
-                        watch_fds = [f for f in watch_fds if f != journal_fd]
-                        journal_fd = None
+                        watch_fds = [f for f in watch_fds if f != pw_fd]
+                        pw_fd = None
                         continue
-                    journal_buffer += chunk.decode()
-                    while "\n" in journal_buffer:
-                        raw_line, journal_buffer = journal_buffer.split("\n", 1)
-                        if NODE_ERROR_RE.search(raw_line):
-                            handle_node_error(state, raw_line)
+                    pw_buffer += chunk.decode()
+                    pw_buffer, pw_initial_done, errors = extract_pw_errors(
+                        pw_buffer, pw_initial_done, pw_seen_errors
+                    )
+                    for desc in errors:
+                        handle_node_error(state, desc)
     finally:
         if dbus_proc.poll() is None:
             dbus_proc.terminate()
             dbus_proc.wait(timeout=5)
-        if journal_proc and journal_proc.poll() is None:
-            journal_proc.terminate()
-            journal_proc.wait(timeout=5)
+        if pw_proc and pw_proc.poll() is None:
+            pw_proc.terminate()
+            pw_proc.wait(timeout=5)
 
 
 def timestamp():
