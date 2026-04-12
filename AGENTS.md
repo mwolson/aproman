@@ -95,7 +95,8 @@ Prefer this for iterating on changes before committing.
 3. Update the version in `pyproject.toml`, `package.json`, and the `VERSION`
    constant in `aproman/aproman.py`. Run `uv lock` to update `uv.lock`, then
    commit all four files together with message
-   `chore: bump version to <version>`.
+   `chore: bump version to <version>`. This must be its own commit, not combined
+   with other changes, unless the user explicitly agrees to that.
 
 4. Push the version-bump commit and verify CI passes before tagging:
 
