@@ -59,6 +59,7 @@ systemctl --user start aproman.service
 ```text
 aproman                              Run as a daemon (default)
 aproman cycle                        Cycle the card profile off and back on
+aproman toggle                       Alias for cycle
 aproman get-default-card             Print the default card from the config file
 aproman get-default-profile          Print the default profile from the config file
 aproman install-service              Install and enable the service (systemd or OpenRC)

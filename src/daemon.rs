@@ -102,10 +102,13 @@ pub fn decode_command(data: &[u8]) -> Result<Command> {
     if command == "reload" {
         return Ok(Command::Reload);
     }
-    if command == "cycle" {
+    if command == "cycle" || command == "toggle" {
         return Ok(Command::Cycle(None));
     }
     if let Some(profile) = command.strip_prefix("cycle ") {
+        return Ok(Command::Cycle(Some(profile.to_string())));
+    }
+    if let Some(profile) = command.strip_prefix("toggle ") {
         return Ok(Command::Cycle(Some(profile.to_string())));
     }
     anyhow::bail!("Unsupported command: {command}")

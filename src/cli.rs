@@ -23,9 +23,10 @@ pub struct Cli {
     pub command: Option<Command>,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, PartialEq, Eq, Subcommand)]
 pub enum Command {
     /// Cycle the card profile off and back on once
+    #[command(visible_alias = "toggle")]
     Cycle,
     /// Print the default card from the config file
     GetDefaultCard,
