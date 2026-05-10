@@ -1,0 +1,13 @@
+services:
+  systemd:
+    build:
+      context: ..
+      dockerfile: integration-tests/systemd/Dockerfile
+  openrc-user:
+    build:
+      context: ..
+      dockerfile: integration-tests/openrc-user/Dockerfile
+  openrc-system:
+    build:
+      context: ..
+      dockerfile: integration-tests/openrc-system/Dockerfile
