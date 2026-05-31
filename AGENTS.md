@@ -50,3 +50,11 @@ Before releasing, run `git fetch --tags` and `bun run hooks:check`. Version
 bumps update `Cargo.toml` and `package.json`, then run `cargo update -p aproman`
 to refresh `Cargo.lock`. Commit the version bump by itself with message
 `chore: bump version to <version>`.
+
+For GitHub release notes, review commits since the previous tag and write notes
+from the user's point of view. Start with a short summary, group related changes
+under descriptive headings, and avoid a single generic `## Changes` section when
+the release has multiple themes. Put user-visible changes first, keep
+maintenance details secondary, and keep the "Full Changelog" link when GitHub
+generated one. Omit routine verification sections or check-command lists; report
+validation in the chat handoff instead.
